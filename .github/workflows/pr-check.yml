@@ -1,0 +1,25 @@
+name: Pull Request Checks
+
+on: [pull_request]
+
+jobs:
+    execute-pr-checks:
+        runs-on: ubuntu-latest
+
+        permissions:
+          pull-requests: write
+
+        steps:
+            - name: checkout repo
+              uses: actions/checkout@v4
+
+            - name: setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                node-version: '20'
+
+            - name: install dependencies
+              run: npm ci
+
+            - name: run linting for project source
+              run: npm run lint
