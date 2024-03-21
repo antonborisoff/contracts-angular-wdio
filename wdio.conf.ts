@@ -167,6 +167,7 @@ export const config: Options.Testrunner = {
   jasmineOpts: {
     // Jasmine default timeout
     defaultTimeoutInterval: jasmineDefaultTimeoutInterval,
+    helpers: ['./test/helpers/*.ts'],
     random: true
   },
 
