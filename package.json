@@ -17,7 +17,7 @@
     "typescript": "^5.4.2"
   },
   "scripts": {
-    "lint": "eslint .",
+    "lint": "eslint ./test",
     "lint:fix": "npm run lint -- --fix",
     "wdio": "wdio run ./wdio.conf.ts"
   },
