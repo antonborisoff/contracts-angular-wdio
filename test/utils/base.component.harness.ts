@@ -191,7 +191,7 @@ export class BaseHarness extends ComponentHarness {
   }
 
   public async selectMatMenuItem(text: string): Promise<void> {
-    this.waitFor({
+    await this.waitFor({
       lookup: async () => {
         return await this.getRootLoader().getHarness(MatMenuItemHarness.with({
           text: text
@@ -336,5 +336,6 @@ export class BaseHarness extends ComponentHarness {
       },
       errorMessage: present ? `No mat dialog ${dialogId} found` : `Mat dialog ${dialogId} found`
     })
+    this.markAssertionAsValidExpectation()
   }
 }
