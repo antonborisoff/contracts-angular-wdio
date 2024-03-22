@@ -6,8 +6,10 @@ import {
 } from '../utils/waiting.component.harness.js'
 import {
   RootHarness
-} from '../utils/app.harness.js'
+} from '../utils/root.harness.js'
 
+// we use harness as lookup scope limiting view
+// this is also where we define custom local methods
 class LoginHarness extends WaitingHarness {
   public static hostSelector = 'app-login'
 }
@@ -32,6 +34,6 @@ export class LoginPage {
 
     // wait for operation completion
     const rootHarness = await getHarness(RootHarness)
-    await rootHarness.waitForPageLeft(LoginHarness)
+    await rootHarness.expectPageLeft(LoginHarness)
   }
 }

@@ -1,8 +1,8 @@
 import {
   ComponentHarness,
-  ComponentHarnessConstructor,
   HarnessLoader,
-  HarnessPredicate
+  HarnessPredicate,
+  TestElement
 } from '@angular/cdk/testing'
 import {
   MatButtonHarness
@@ -11,13 +11,9 @@ import {
   MatDialogHarness
 } from '@angular/material/dialog/testing'
 import {
-  MatIconHarness
-} from '@angular/material/icon/testing'
-import {
   MatMenuItemHarness
 } from '@angular/material/menu/testing'
 import {
-  MatTableHarness,
   MatRowHarness
 } from '@angular/material/table/testing'
 import {
@@ -25,7 +21,7 @@ import {
   MessageType
 } from './interfaces'
 
-interface ancestorHarnessConfig<T extends ComponentHarness> {
+interface AncestorHarnessConfig<T extends ComponentHarness> {
   itemTag: string
   itemHarnessPredicate: HarnessPredicate<T>
 }
@@ -49,7 +45,7 @@ export class BaseHarness extends ComponentHarness {
 
   // TODO: convert to private once ancestorSelector is managed centrally via getCssSelector (not passed to it)
   protected ancestorSelector: string = ''
-  protected ancestorHarnessConfig?: ancestorHarnessConfig<MatRowHarness>
+  protected ancestorHarnessConfig?: AncestorHarnessConfig<MatRowHarness>
 
   protected getIdSelector(id: string): string {
     return `[${this.idAttribute}="${id}"]`
@@ -76,6 +72,43 @@ export class BaseHarness extends ComponentHarness {
     }
   }
 
+  protected async getLookupResult<T>(lookup: () => Promise<T | null>): Promise<T | null> {
+    let result: T | null
+    try {
+      result = await lookup()
+    }
+    catch (err) {
+      result = null
+    }
+    return result
+  }
+
+  protected async waitFor<T extends TestElement | ComponentHarness | boolean>(options: {
+    lookup: () => Promise<T | null>
+    action?: (result: T) => Promise<void>
+    errorMessage: string
+  }): Promise<void> {
+    // no need to do polling in unit tests
+    // since component harnesses stabilize them internally
+    const result = await this.getLookupResult(options.lookup)
+    if (!result) {
+      throw new Error(options.errorMessage)
+    }
+    else {
+      if (options.action) {
+        await options.action(result)
+      }
+    }
+  }
+
+  protected markAssertionAsValidExpectation(): void {
+    // this is needed to make Jasmine and its reporter
+    // treat our custom assertions as valid expectations;
+    // otherwise they will mark specs with only custom assertions
+    // as ones without expectations;
+    expect(1).toBe(1)
+  }
+
   /********************************
    * WRAPPERS
    *******************************/
@@ -87,33 +120,6 @@ export class BaseHarness extends ComponentHarness {
     ) as this
     copy.ancestorSelector = `div${this.getIdSelector(id)} `
     return copy
-  }
-
-  public inMatTableRow(tableId: string, rowFilter: Record<string, string>): this {
-    const copy = Object.create(
-      Object.getPrototypeOf(this),
-      Object.getOwnPropertyDescriptors(this)
-    ) as this
-    copy.ancestorHarnessConfig = {
-      itemHarnessPredicate: MatRowHarness.with({
-        ancestor: this.getIdSelector(tableId)
-      }).addOption(`row`, rowFilter, async (harness, rowFilter) => {
-        const rowValues = await harness.getCellTextByColumnName()
-        return Object.keys(rowFilter).every((key) => {
-          return rowValues[key] === rowFilter[key]
-        })
-      }),
-      itemTag: 'tr'
-    }
-    return copy
-  }
-
-  // for interaction within an open mat dialog
-  public async matDialogHarness<T extends BaseHarness>(dialogId: string, harness: ComponentHarnessConstructor<T>): Promise<T> {
-    const matDialog = await this.getRootLoader().getHarness(MatDialogHarness.with({
-      selector: `#${dialogId}`
-    }))
-    return await matDialog.getHarness(harness)
   }
 
   /********************************
@@ -130,24 +136,32 @@ export class BaseHarness extends ComponentHarness {
     ]
     const cssSelectorDisabable = this.getCssSelector(id, disabableTags, this.ancestorSelector, ':not([disabled])')
     const cssSelectorRegular = this.getCssSelector(id, regularTags, this.ancestorSelector)
-    const element = await this.locatorFor(`${cssSelectorDisabable},${cssSelectorRegular}`)()
-    return await element.click()
-  }
 
-  public async selectMatMenuItem(text: string): Promise<void> {
-    const matMenuItem = await this.getRootLoader().getHarness(MatMenuItemHarness.with({
-      text: text
-    }))
-    await matMenuItem.click()
+    await this.waitFor({
+      lookup: async () => {
+        return await this.locatorFor(`${cssSelectorDisabable},${cssSelectorRegular}`)()
+      },
+      errorMessage: `No element for selector ${cssSelectorDisabable},${cssSelectorRegular} found.`,
+      action: async (element: TestElement) => {
+        await element.click()
+      }
+    })
   }
 
   // +
   public async messageBoxClick(action: MessageActions): Promise<void> {
-    const messageBox = await this.getRootLoader().getHarness(MatDialogHarness)
-    const button = await messageBox.getHarness(MatButtonHarness.with({
-      selector: `${this.getIdSelector(`${action}Button`)}`
-    }))
-    await button.click()
+    await this.waitFor({
+      lookup: async () => {
+        const messageBox = await this.getRootLoader().getHarness(MatDialogHarness)
+        return await messageBox.getHarness(MatButtonHarness.with({
+          selector: `${this.getIdSelector(`${action}Button`)}`
+        }))
+      },
+      errorMessage: `No message box button for action ${action} found.`,
+      action: async (button: MatButtonHarness) => {
+        await button.click()
+      }
+    })
   }
 
   // +
@@ -156,24 +170,45 @@ export class BaseHarness extends ComponentHarness {
       'input',
       'textarea'
     ])
-    const input = await this.locatorFor(cssSelector)()
-    if (value.length) {
-      await input.setInputValue(value)
-    }
-    else {
-      await input.clear()
-    }
-    await input.dispatchEvent('input')
-    if (blur) {
-      await input.blur()
-    }
+    await this.waitFor({
+      lookup: async () => {
+        return await this.locatorFor(cssSelector)()
+      },
+      errorMessage: `No element for selector ${cssSelector} found.`,
+      action: async (input) => {
+        if (value.length) {
+          await input.setInputValue(value)
+        }
+        else {
+          await input.clear()
+        }
+        await input.dispatchEvent('input')
+        if (blur) {
+          await input.blur()
+        }
+      }
+    })
+  }
+
+  public async selectMatMenuItem(text: string): Promise<void> {
+    this.waitFor({
+      lookup: async () => {
+        return await this.getRootLoader().getHarness(MatMenuItemHarness.with({
+          text: text
+        }))
+      },
+      errorMessage: `No mat menu item with text '${text}' found`,
+      action: async (matMenuItem: MatMenuItemHarness) => {
+        await matMenuItem.click()
+      }
+    })
   }
 
   /********************************
    * ASSERTIONS
    *******************************/
   // +
-  public async elementVisible(id: string): Promise<boolean> {
+  public async expectElementVisible(id: string, visible: boolean): Promise<void> {
     const cssSelector = this.getCssSelector(id, [
       'h1',
       'p',
@@ -184,19 +219,27 @@ export class BaseHarness extends ComponentHarness {
       'mat-error',
       'mat-card'
     ])
-    const element = await this.locatorForOptional(cssSelector)()
-    if (element) {
-      const display = await element.getCssValue('display')
-      const visibility = await element.getCssValue('visibility')
-      return display !== 'none' && visibility !== 'hidden'
-    }
-    else {
-      return false
-    }
+    await this.waitFor({
+      lookup: async () => {
+        let elementVisible: boolean
+        const element = await this.locatorForOptional(cssSelector)()
+        if (element) {
+          const display = await element.getCssValue('display')
+          const visibility = await element.getCssValue('visibility')
+          elementVisible = (display !== 'none' && visibility !== 'hidden')
+        }
+        else {
+          elementVisible = false
+        }
+        return elementVisible === visible
+      },
+      errorMessage: `No ${visible ? 'visible' : 'invisible'} element for selector ${cssSelector} found`
+    })
+    this.markAssertionAsValidExpectation()
   }
 
   // +
-  public async elementText(id: string): Promise<string> {
+  public async expectElementText(id: string, text: string): Promise<void> {
     await this.updateAncestorSelector()
     const cssSelector = this.getCssSelector(id, [
       'h1',
@@ -208,83 +251,90 @@ export class BaseHarness extends ComponentHarness {
       'td',
       'mat-icon'
     ], this.ancestorSelector)
-    const element = await this.locatorFor(cssSelector)()
-    return await element.text()
+    await this.waitFor({
+      lookup: async () => {
+        const element = await this.locatorFor(cssSelector)()
+        return await element.text() === text
+      },
+      errorMessage: `No element for selector ${cssSelector} with text '${text}' found`
+    })
+    this.markAssertionAsValidExpectation()
   }
 
   // +
-  public async elementHasClass(id: string, cssClass: string): Promise<boolean> {
+  public async expectElementClass(id: string, cssClass: string, present: boolean): Promise<void> {
     await this.updateAncestorSelector()
     const cssSelector = this.getCssSelector(id, [
       'mat-toolbar',
       'button'
     ], this.ancestorSelector)
-    const element = await this.locatorFor(cssSelector)()
-    return await element.hasClass(cssClass)
-  }
 
-  public async matButtonText(id: string): Promise<string> {
-    const matButton = await this.locatorFor(MatButtonHarness.with({
-      selector: `${this.getIdSelector(id)}`
-    }))()
-    const matButtonIcon = await matButton.getHarnessOrNull(MatIconHarness)
-    const matButtonText = await matButton.getText()
-    const matButtonIconText = await matButtonIcon?.getName() || ''
-    return matButtonText.replace(matButtonIconText, '').trim()
-  }
-
-  public async elementChildCount(id: string): Promise<number> {
-    const supportedTags = [
-      'div',
-      'mat-dialog-actions'
-    ]
-    // we need to retrieve the parent first to make sure it exists
-    const cssSelectorParent = this.getCssSelector(id, supportedTags, this.ancestorSelector)
-    await this.locatorFor(cssSelectorParent)()
-    const cssSelectorChildren = this.getCssSelector(id, supportedTags, this.ancestorSelector, ' > *')
-    const children = await this.locatorForAll(cssSelectorChildren)()
-    return children.length
+    await this.waitFor({
+      lookup: async () => {
+        const element = await this.locatorFor(cssSelector)()
+        return await element.hasClass(cssClass) === present
+      },
+      errorMessage: `No element for selector ${cssSelector} with css class '${cssClass}' found`
+    })
+    this.markAssertionAsValidExpectation()
   }
 
   // +
-  public async buttonEnabled(id: string): Promise<boolean> {
-    const button = await this.locatorFor(`button${this.getIdSelector(id)}`)()
-    return !(await button.getProperty('disabled'))
+  public async expectButtonEnabled(id: string, enabled: boolean): Promise<void> {
+    const cssSelector = `button${this.getIdSelector(id)}`
+    await this.waitFor({
+      lookup: async () => {
+        const button = await this.locatorFor(cssSelector)()
+        return await button.getProperty('disabled') === !enabled
+      },
+      errorMessage: `No ${enabled ? 'enabled' : 'disabled'} element for selector ${cssSelector} found`
+    })
+    this.markAssertionAsValidExpectation()
   }
 
   // +
-  public async inputValue(id: string): Promise<string> {
+  public async expectInputValue(id: string, value: string): Promise<void> {
     const cssSelector = this.getCssSelector(id, [
       'input',
       'textarea'
     ])
-    const input = await this.locatorFor(cssSelector)()
-    return await input.getProperty('value')
-  }
 
-  public async matTableNRows(id: string): Promise<number> {
-    const matTable = await this.locatorFor(MatTableHarness.with({
-      selector: this.getIdSelector(id)
-    }))()
-    const rows = await matTable.getRows()
-    return rows.length
-  }
-
-  public async matDialogPresent(dialogId: string): Promise<boolean> {
-    const matDialog = await this.getRootLoader().getHarnessOrNull(MatDialogHarness.with({
-      selector: `#${dialogId}`
-    }))
-    return !!matDialog
+    await this.waitFor({
+      lookup: async () => {
+        const input = await this.locatorFor(cssSelector)()
+        return await input.getProperty('value') === value
+      },
+      errorMessage: `No element for selector ${cssSelector} with value '${value}' found`
+    })
+    this.markAssertionAsValidExpectation()
   }
 
   // +
-  public async messageBoxPresent(type: MessageType, message?: string): Promise<boolean> {
-    const messageBox = await this.getRootLoader().getHarnessOrNull(MatDialogHarness.with({
-      selector: `#${type}MessageBox`
-    }).addOption('message', message, async (harness, message): Promise<boolean> => {
-      const actualMessage = await harness.getContentText()
-      return actualMessage === message
-    }))
-    return !!messageBox
+  public async expectMessageBoxPresent(type: MessageType, message?: string): Promise<void> {
+    await this.waitFor({
+      lookup: async () => {
+        const messageBox = await this.getRootLoader().getHarnessOrNull(MatDialogHarness.with({
+          selector: `#${type}MessageBox`
+        }).addOption('message', message, async (harness, message): Promise<boolean> => {
+          const actualMessage = await harness.getContentText()
+          return actualMessage === message
+        }))
+        return !!messageBox
+      },
+      errorMessage: `No message box of type ${type} with message '${message}' found`
+    })
+    this.markAssertionAsValidExpectation()
+  }
+
+  public async expectMatDialogPresent(dialogId: string, present: boolean): Promise<void> {
+    await this.waitFor({
+      lookup: async () => {
+        const matDialog = await this.getRootLoader().getHarnessOrNull(MatDialogHarness.with({
+          selector: `#${dialogId}`
+        }))
+        return !!matDialog === present
+      },
+      errorMessage: present ? `No mat dialog ${dialogId} found` : `Mat dialog ${dialogId} found`
+    })
   }
 }
