@@ -1,10 +1,12 @@
 import {
-  ComponentHarnessConstructor
+  ComponentHarnessConstructor,
+  HarnessLoader
 } from '@angular/cdk/testing'
 import {
   WaitingHarness
 } from './waiting.component.harness.js'
 import {
+  createHarnessEnvironment,
   getHarness
 } from '@badisi/wdio-harness'
 
@@ -42,6 +44,14 @@ export class Utils {
     return result
   }
 
+  private static rootLoader: HarnessLoader
+  private static async getRootLoader(): Promise<HarnessLoader> {
+    if (!this.rootLoader) {
+      this.rootLoader = await createHarnessEnvironment()
+    }
+    return this.rootLoader
+  }
+
   public static async waitForHarness<T extends WaitingHarness>(harness: ComponentHarnessConstructor<T>): Promise<T> {
     let result = await this.retrieveHarness(harness)
     const endTime = Date.now() + this.waitForTimeoutInterval
@@ -53,6 +63,8 @@ export class Utils {
       throw new Error('Failed to retrieve harness: harness not found')
     }
     else {
+      const rootLoader = await this.getRootLoader()
+      result.initRootLoader(rootLoader)
       return result
     }
   }
