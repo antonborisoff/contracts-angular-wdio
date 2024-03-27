@@ -39,6 +39,9 @@ export class Utils {
       result = await getHarness(harness)
     }
     catch (err) {
+      console.log('############## START: harness retrieval failure ################')
+      console.log(err)
+      console.log('############## END: harness retrieval failure ################')
       result = null
     }
     return result
