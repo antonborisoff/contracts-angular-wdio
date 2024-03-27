@@ -104,6 +104,9 @@ export class BaseHarness extends ComponentHarness {
       result = await lookup()
     }
     catch (err) {
+      console.log('############## START: lookup failure ################')
+      console.log(err)
+      console.log('############## END: lookup failure ################')
       result = null
     }
     return result
