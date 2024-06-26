@@ -2,6 +2,10 @@ name: Pull Request Checks
 
 on: [pull_request]
 
+env:
+  # WDIO env variable since we run on ubuntu-latest
+  PLATFORM_NAME: linux
+
 jobs:
     execute-pr-checks:
         runs-on: ubuntu-latest
@@ -12,6 +16,8 @@ jobs:
         steps:
             - name: checkout repo
               uses: actions/checkout@v4
+              with:
+                path: e2e-tests
 
             - name: setup Node.js
               uses: actions/setup-node@v4
@@ -20,6 +26,64 @@ jobs:
 
             - name: install dependencies
               run: npm ci
+              working-directory: e2e-tests
 
             - name: run linting for project source
               run: npm run lint
+              working-directory: e2e-tests
+
+            - name: checkout Angular app UI
+              uses: actions/checkout@v4
+              with:
+                repository: antonborisoff/contracts-angular
+                path: contracts-angular
+            
+            - name: install Angular app UI dependencies
+              run: npm ci
+              working-directory: contracts-angular
+
+            - name: run Angular app UI
+              uses: JarvusInnovations/background-action@v1
+              with:
+                run: npm run start &
+                # the host and port Angular local development server runs at by default
+                wait-on: http://localhost:4200
+                tail: true
+                log-output-resume: stderr
+                wait-for: 15s
+                log-output: stderr,stdout
+                log-output-if: failure
+                working-directory: contracts-angular
+
+            - name: checkout app backend
+              uses: actions/checkout@v4
+              with:
+                repository: antonborisoff/contracts-backend
+                path: contracts-backend
+
+            - name: install app backend dependencies
+              run: npm ci
+              working-directory: contracts-backend
+            
+            - name: run app backend
+              uses: JarvusInnovations/background-action@v1
+              with:
+                run: npm run server &
+                # host and port express server runs at by default; API is designed to check the server status
+                wait-on: http://localhost:9000/status
+                tail: true
+                log-output-resume: stderr
+                wait-for: 15s
+                log-output: stderr,stdout
+                log-output-if: failure
+                working-directory: contracts-backend
+
+            - name: run e2e tests against the app
+              run: npm run wdio:github-actions
+              working-directory: e2e-tests
+
+            - uses: actions/upload-artifact@v4
+              with:
+                name: wdio-logs
+                # this is the folder specified in wdio.conf.ts
+                path: e2e-tests/wdio-logs/
